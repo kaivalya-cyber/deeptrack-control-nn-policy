@@ -1,6 +1,6 @@
 # Car Racing Simulation (REINFORCE)
 
-This folder is a **separate simulation** from the Hopper track project. It trains a car to race around a track using **REINFORCE** and Gymnasium’s **CarRacing-v3** (Box2D) environment.
+It trains a car to race around a track using **REINFORCE** and Gymnasium’s **CarRacing-v3** (Box2D) environment.
 
 - **Environment**: Top-down car, continuous actions (steer, gas, brake), 96×96 RGB image observation.
 - **Policy**: CNN that takes the image and outputs a Gaussian policy over 3 actions.
