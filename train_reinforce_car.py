@@ -27,12 +27,12 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 class CNNPolicy(nn.Module):
-    """CNN policy for image obs (96x96x3): outputs mean and std for 3 actions (steer, gas, brake)."""
+    """CNN policy for image obs: outputs mean and std for 3 actions (steer, gas, brake)."""
 
-    def __init__(self, action_space_dims: int = 3):
+    def __init__(self, action_space_dims: int = 3, in_channels: int = 4):
         super().__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(3, 16, kernel_size=8, stride=4),
+            nn.Conv2d(in_channels, 16, kernel_size=8, stride=4),
             nn.ReLU(),
             nn.Conv2d(16, 32, kernel_size=4, stride=2),
             nn.ReLU(),
@@ -71,23 +71,28 @@ class REINFORCE:
         self.learning_rate = 1e-4
         self.gamma = 0.99
         self.eps = 1e-6
+        self.entropy_coef = 0.01
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.probs: list[torch.Tensor] = []
+        self.entropies: list[torch.Tensor] = []
         self.rewards: list[float] = []
-        self.net = policy
+        self.net = policy.to(self.device)
         self.optimizer = torch.optim.AdamW(self.net.parameters(), lr=self.learning_rate)
+        self.scheduler = torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.999)
         self._action_dims = action_space_dims
 
     def sample_action(self, state: np.ndarray) -> np.ndarray:
-        # state: (96, 96, 3) uint8 -> (1, 3, 96, 96) float
+        # state: (4, 96, 96) uint8 -> (1, 4, 96, 96) float
         x = np.asarray(state, dtype=np.float32) / 255.0
-        x = x.transpose(2, 0, 1)
-        x = torch.tensor(x[np.newaxis, ...])
+        x = torch.tensor(x[np.newaxis, ...], device=self.device)
         action_means, action_stddevs = self.net(x)
         distrib = Normal(action_means[0] + self.eps, action_stddevs[0] + self.eps)
         action = distrib.sample()
         prob = distrib.log_prob(action).sum()
+        entropy = distrib.entropy().sum()
         self.probs.append(prob)
-        return action.numpy()
+        self.entropies.append(entropy)
+        return action.cpu().numpy()
 
     def update(self) -> None:
         running_g = 0.0
@@ -95,15 +100,18 @@ class REINFORCE:
         for R in self.rewards[::-1]:
             running_g = R + self.gamma * running_g
             gs.insert(0, running_g)
-        deltas = torch.tensor(gs, dtype=torch.float32)
+        deltas = torch.tensor(gs, dtype=torch.float32, device=self.device)
         # Normalize returns
         deltas = (deltas - deltas.mean()) / (deltas.std() + self.eps)
         log_probs = torch.stack(self.probs).squeeze()
-        loss = -torch.sum(log_probs * deltas)
+        entropies = torch.stack(self.entropies).squeeze()
+        loss = -torch.sum(log_probs * deltas) - self.entropy_coef * torch.sum(entropies)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+        self.scheduler.step()
         self.probs = []
+        self.entropies = []
         self.rewards = []
 
 
@@ -119,6 +127,8 @@ def main() -> None:
     if args.render:
         print("Rendering enabled: a CarRacing window should open. Close it or wait for training to finish.")
     env = gym.make("CarRacing-v3", continuous=True, render_mode=render_mode)
+    env = gym.wrappers.GrayscaleObservation(env)
+    env = gym.wrappers.FrameStackObservation(env, stack_size=4)
     wrapped_env = gym.wrappers.RecordEpisodeStatistics(env, 50)
 
     action_space_dims = env.action_space.shape[0]  # 3
