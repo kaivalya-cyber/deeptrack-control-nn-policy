@@ -33,17 +33,17 @@ class CNNPolicy(nn.Module):
         super().__init__()
         self.conv = nn.Sequential(
             nn.Conv2d(3, 16, kernel_size=8, stride=4),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Conv2d(16, 32, kernel_size=4, stride=2),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Conv2d(32, 32, kernel_size=3, stride=1),
-            nn.Tanh(),
+            nn.ReLU(),
         )
         # 96 -> 23 -> 10 -> 8; 8*8*32 = 2048
         self.flatten_size = 32 * 8 * 8
         self.fc = nn.Sequential(
             nn.Linear(self.flatten_size, 256),
-            nn.Tanh(),
+            nn.ReLU(),
         )
         self.policy_mean_net = nn.Linear(256, action_space_dims)
         self.policy_stddev_net = nn.Linear(256, action_space_dims)
@@ -55,6 +55,11 @@ class CNNPolicy(nn.Module):
         features = features.view(features.size(0), -1)
         features = self.fc(features)
         action_means = self.policy_mean_net(features)
+        # Squash actions: steer in [-1, 1], gas in [0, 1], brake in [0, 1]
+        steer = torch.tanh(action_means[:, 0:1])
+        gas = torch.sigmoid(action_means[:, 1:2])
+        brake = torch.sigmoid(action_means[:, 2:3])
+        action_means = torch.cat([steer, gas, brake], dim=-1)
         action_stddevs = torch.log(1 + torch.exp(self.policy_stddev_net(features)))
         return action_means, action_stddevs
 
@@ -91,6 +96,8 @@ class REINFORCE:
             running_g = R + self.gamma * running_g
             gs.insert(0, running_g)
         deltas = torch.tensor(gs, dtype=torch.float32)
+        # Normalize returns
+        deltas = (deltas - deltas.mean()) / (deltas.std() + self.eps)
         log_probs = torch.stack(self.probs).squeeze()
         loss = -torch.sum(log_probs * deltas)
         self.optimizer.zero_grad()
