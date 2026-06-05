@@ -37,3 +37,25 @@ python3 train_reinforce_car.py
 The learning curve is saved as **learning_curve_car.png** in this folder.
 
 **Rendering:** With `--render`, a CarRacing game window opens and updates each step. If you see a “video device not available” or similar error (e.g. on a headless server), run without `--render`; rendering requires a display.
+
+## Repository Structure and Logic
+
+### File Structure
+
+- **`train_reinforce_car.py`**: The main entry point. It contains the model definition, the RL agent logic, and the training loop.
+- **`requirements.txt`**: Lists the Python dependencies (Gymnasium, PyTorch, etc.).
+- **`learning_curve_car.png`**: An example output plot showing agent performance over episodes.
+
+### Logic and Architecture
+
+#### CNN Policy (`CNNPolicy`)
+The agent uses a Convolutional Neural Network to process the 96x96x3 image observations from the environment.
+- **Feature Extractor**: Three convolutional layers with Tanh activations.
+- **Policy Heads**: Two linear layers that output the **mean** and **standard deviation** for each of the 3 actions (steer, gas, brake).
+- **Action Sampling**: Actions are sampled from a Normal distribution defined by these means and standard deviations.
+
+#### REINFORCE Algorithm
+The training follows the REINFORCE (Monte Carlo Policy Gradient) logic:
+1. **Sampling**: For each step in an episode, the agent samples an action and stores its log-probability.
+2. **Returns**: At the end of the episode, it calculates the discounted cumulative rewards (returns) for each step.
+3. **Update**: The policy is updated by minimizing the loss: `loss = -sum(log_prob * return)`. This increases the probability of actions that led to higher rewards.
